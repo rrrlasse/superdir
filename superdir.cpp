@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -224,95 +224,92 @@ std::wstring GetTimeAgo(LARGE_INTEGER inputTime, LARGE_INTEGER now) {
         unit = L's';
     }
 
-    // Højrejustering til 4 tegn (3 cifre/mellemrum + 1 enhed)
     std::wstringstream wss;
     wss << std::setw(3) << std::right << val << unit;
     return wss.str();
 }
 
 
-// 2. Formaterer tidsstempler
-void PrintTime(const LARGE_INTEGER& li, int precision) {
-    FILETIME ft;
-    ft.dwLowDateTime = li.LowPart;
-    ft.dwHighDateTime = li.HighPart;
+#include <chrono>
+#include <format>
 
-    FILETIME localFt;
-    SYSTEMTIME st;
+std::wstring GetFormattedTime(const LARGE_INTEGER& li, int precision) {
+    if (li.QuadPart <= 0 && precision == 2) {
+        return L"0000-00-00 00:00:00";
+    }
 
-    // 1. Konverter UTC til lokal filtid
-    FileTimeToLocalFileTime(&ft, &localFt);
-    FileTimeToSystemTime(&localFt, &st);
-    if (precision == 0) {
-        wprintf(L"%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
+    // Windows FILETIME starter 1. jan 1601. 
+    // Vi bruger offset 11644473600 sekunder for at ramme Unix Epoch (1970)
+    using file_duration = std::chrono::duration<long long, std::ratio<1, 10000000>>;
+    std::chrono::sys_time<file_duration> tp{ file_duration{li.QuadPart - 116444736000000000LL} };
+
+    auto local_tp = std::chrono::current_zone()->to_local(tp);
+
+    switch (precision) {
+    case 0:  return std::format(L"{:%Y-%m-%d}", local_tp);
+    case 1:  return std::format(L"{:%Y-%m-%d %H:%M}", local_tp);
+    case 2:  return std::format(L"{:%Y-%m-%d %H:%M:%S}", std::chrono::floor<std::chrono::seconds>(local_tp));
+    default: {
+        // Vi tager de første 3 cifre af sub-sekunderne (millisekunder)
+        auto ms = std::chrono::floor<std::chrono::milliseconds>(local_tp);
+        return std::format(L"{:%Y-%m-%d %H:%M:%S}", ms);
     }
-    else if (precision == 1) {
-        wprintf(L"%04d-%02d-%02d %02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
-    }
-    else if (precision == 2) {
-        if (li.QuadPart > 0) {
-            wprintf(L"%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-        }
-        else {
-            wprintf(L"0000-00-00 00:00:00");
-        }
-    }
-    else {
-        wprintf(L"%04d-%02d-%02d %02d:%02d:%02d.%03d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     }
 }
 
-
-
-#include <windows.h>
-#include <aclapi.h>
-#include <iostream>
-#include <string>
 #include <map>
-
-#include <windows.h>
 #include <sddl.h>
-#include <string>
-#include <map>
+
 
 std::wstring GetShortSidName(PSID pSid) {
     if (!pSid || !IsValidSid(pSid)) return L"UNKNOWN";
 
     static const std::map<std::wstring, std::wstring> sddlShortNames = {
-        // --- CORE GROUPS ---
-        { L"S-1-5-18", L"SY" }, // Local System
-        { L"S-1-1-0",  L"WD" }, // Everyone (World)
-        { L"S-1-5-11", L"AU" }, // Authenticated Users
-        { L"S-1-3-0",  L"CO" }, // Creator Owner
-        { L"S-1-3-1",  L"PS" }, // Principal Self
+        // --- Indbyggede Sikkerhedsprinciper (Sprog-uafhængige) ---
+        { L"S-1-1-0",       L"WD" }, // Everyone
+        { L"S-1-3-0",       L"CO" }, // Creator Owner
+        { L"S-1-3-1",       L"CG" }, // Creator Group
+        { L"S-1-5-1",       L"DI" }, // Dialup
+        { L"S-1-5-2",       L"NU" }, // Network
+        { L"S-1-5-3",       L"BA" }, // Batch
+        { L"S-1-5-4",       L"IU" }, // Interactive
+        { L"S-1-5-6",       L"SU" }, // Service
+        { L"S-1-5-7",       L"AN" }, // Anonymous
+        { L"S-1-5-11",      L"AU" }, // Authenticated Users
+        { L"S-1-5-12",      L"RC" }, // Restricted Code
+        { L"S-1-5-13",      L"WR" }, // Write Restricted
+        { L"S-1-5-18",      L"SY" }, // Local System
+        { L"S-1-5-19",      L"LS" }, // Local Service
+        { L"S-1-5-20",      L"NS" }, // Network Service
 
-        // --- BUILT-IN GROUPS (S-1-5-32-xxx) ---
-        { L"S-1-5-32-544", L"BA" }, // Built-in Administrators
-        { L"S-1-5-32-545", L"BU" }, // Built-in Users
-        { L"S-1-5-32-546", L"BG" }, // Built-in Guests
+        // --- Indbyggede Grupper (Built-in Aliases) ---
+        { L"S-1-5-32-544", L"BA" }, // Administrators
+        { L"S-1-5-32-545", L"BU" }, // Users
+        { L"S-1-5-32-546", L"BG" }, // Guests
         { L"S-1-5-32-547", L"PU" }, // Power Users
-        { L"S-1-5-32-548", L"AO" }, // Account Operators
+        { L"S-1-5-32-548", L"BO" }, // Account Operators
         { L"S-1-5-32-549", L"SO" }, // Server Operators
-        { L"S-1-5-32-550", L"PO" }, // Printer Operators
-        { L"S-1-5-32-551", L"BO" }, // Backup Operators
-        { L"S-1-5-32-552", L"RE" }, // Replicator
+        { L"S-1-5-32-550", L"PO" }, // Print Operators
+        { L"S-1-5-32-551", L"BR" }, // Backup Operators
+        { L"S-1-5-32-552", L"RE" }, // Replicators
+        { L"S-1-5-32-554", L"BU" }, // Pre-Windows 2000 Compatible Access
+        { L"S-1-5-32-555", L"RD" }, // Remote Desktop Users
+        { L"S-1-5-32-558", L"NE" }, // Network Configuration Operators
+        { L"S-1-5-32-559", L"IU" }, // Incoming Forest Trust Builders
 
-        // --- SERVICE ACCOUNTS & LOGIN TYPES ---
-        { L"S-1-5-19", L"LS" }, // Local Service
-        { L"S-1-5-20", L"NS" }, // Network Service
-        { L"S-1-5-6",  L"SU" }, // Service (Service Logon)
-        { L"S-1-5-4",  L"IU" }, // Interactive (Logged on locally)
-        { L"S-1-5-7",  L"AN" }, // Anonymous
-        { L"S-1-5-3",  L"BL" }, // Batch (Batch Logon)
+        // --- App Containere (UWP / AppX) ---
+        { L"S-1-15-2-1",    L"AC" }, // All Application Packages
+        { L"S-1-15-2-2",    L"RC" }, // All Restricted Application Packages
 
-        // --- APP PACKAGES (Windows 8+) ---
-        { L"S-1-15-2-1", L"AC" }, // All Application Packages
-        { L"S-1-15-2-2", L"RC" }, // All Restricted Application Packages
+        // --- Specielle Service Konti (Som ofte ses i System-filer) ---
+        { L"S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464", L"TI" }, // TrustedInstaller
+        { L"S-1-5-80-0",    L"WA" }, // All Services
 
-        // --- SPECIAL SYSTEM SIDS ---
-        // TrustedInstaller (har ingen 2-bogstavs kode i SDDL, så vi bruger 'TI')
-        { L"S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464", L"TI" }
+        // User Mode Driver Framework (UMDF)
+        { L"S-1-5-80-3635958273-333157270-2051610403-1070562692-2350811566", L"UD" }
+
     };
+
 
     // 2. Konverter binær SID til streng-format (f.eks. S-1-5-32-544)
     LPWSTR stringSid = nullptr;
@@ -335,7 +332,7 @@ std::wstring GetShortSidName(PSID pSid) {
 
 #include <tuple>
 
-wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
+wstring PrintHumanACL(const std::wstring& filePath, bool all) {
     PSECURITY_DESCRIPTOR pSD = NULL;
     PACL pDacl = NULL;
 
@@ -354,7 +351,6 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
     wstring AU = L"-";
     wstring BU = L"-";
 
-    // 2. Map til konsolidering: <Navn, AccessMask>
     std::map<std::wstring, DWORD> consolidated;
 
     for (WORD i = 0; i < pDacl->AceCount; i++) {
@@ -362,7 +358,6 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
         if (GetAce(pDacl, i, &pAce)) {
             PACE_HEADER pHeader = (PACE_HEADER)pAce;
 
-            // Vi fokuserer på ALLOWED typer
             if (pHeader->AceType == ACCESS_ALLOWED_ACE_TYPE) {
                 ACCESS_ALLOWED_ACE* pAllowed = (ACCESS_ALLOWED_ACE*)pAce;
 
@@ -374,7 +369,7 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
 
                 if (LookupAccountSidW(NULL, &pAllowed->SidStart, name, &nLen, domain, &dLen, &use)) {
                     std::wstring fullName = GetShortSidName(&pAllowed->SidStart);
-                    if (!builtin) {
+                    if (!all) {
                         if (fullName.empty() || fullName == L"BU" || fullName == L"AU") {
                             if (fullName != L"BU" && fullName != L"AU") {
                                 fullName = name;
@@ -392,8 +387,6 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
             }
         }
     }
-
-    // 3. Print resultaterne
 
     std::map<wstring, wstring> m;
 
@@ -413,7 +406,7 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
             if (mask & 0x80000000) access = L"R*"; // GENERIC_READ
         }
 
-        if (builtin) {
+        if (all) {
             m[access] += (m[access] != L"" ? L"/" : L"") + user;
         }
         else {
@@ -431,7 +424,7 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
 
     wstring res;
 
-    if (builtin) {
+    if (all) {
         for (auto& a : m) {
             res += a.second + L":" + a.first + L" ";
         }
@@ -444,8 +437,6 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
         }
     }
 
-
-    // Husk at frigøre hukommelse allokeret af GetNamedSecurityInfo
     if (pSD) LocalFree(pSD);
 
     if (!res.empty()) {
@@ -455,7 +446,6 @@ wstring PrintHumanACL(const std::wstring& filePath, bool builtin) {
 }
 
 
-// 4. Finder og lister ADS
 std::vector<std::pair<wstring, uint64_t>> get_ads(const std::wstring& path) {
     std::vector<std::pair<wstring, uint64_t>> res;
     WIN32_FIND_STREAM_DATA sd;
@@ -479,32 +469,23 @@ std::vector<std::pair<wstring, uint64_t>> get_ads(const std::wstring& path) {
 }
 
 
-#include <windows.h>
-#include <winioctl.h>
-#include <string>
-#include <vector>
-
-
-#include <windows.h>
-#include <winioctl.h>
-#include <string>
-#include <vector>
-
-
-
+#include <filesystem>
 
 
 std::wstring GetLinkTarget2(const std::wstring& path) {
+    return std::filesystem::read_symlink(path);
+
+
     HANDLE hFile = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
 
-    if (hFile == INVALID_HANDLE_VALUE) return L"";
+    if (hFile == INVALID_HANDLE_VALUE) return {};
 
     std::vector<BYTE> buffer(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
     DWORD bytesReturned;
     if (!DeviceIoControl(hFile, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer.data(), (DWORD)buffer.size(), &bytesReturned, NULL)) {
         CloseHandle(hFile);
-        return L"";
+        return {};
     }
     CloseHandle(hFile);
 
@@ -529,8 +510,6 @@ std::wstring GetLinkTarget2(const std::wstring& path) {
     if (pathBufferStart && lenBytes > 0) {
         target = std::wstring((wchar_t*)(pathBufferStart + offset), lenBytes / sizeof(WCHAR));
 
-        // RENSNING: Fjern NT-objekt præfiks "\??\" hvis det findes
-        // Dette gør "\??\C:\Target" til "C:\Target"
         if (target.size() >= 4 && target.substr(0, 4) == L"\\??\\") {
             target = target.substr(4);
         }
@@ -540,15 +519,11 @@ std::wstring GetLinkTarget2(const std::wstring& path) {
 }
 
 
-#include <algorithm>
-
 std::vector<std::wstring> GetAllHardLinks(const std::wstring& inputPath) {
     std::vector<std::wstring> otherLinks;
     WCHAR lName[MAX_PATH];
     DWORD sz = MAX_PATH;
 
-    // 1. Find det volumen-relative navn for inputPath (fjerner f.ex. "C:")
-    // Vi bruger dette til at sammenligne med resultaterne fra FindFirstFileNameW
     std::wstring searchName = inputPath;
     size_t colonPos = searchName.find(L':');
     if (colonPos != std::wstring::npos) {
@@ -557,26 +532,22 @@ std::vector<std::wstring> GetAllHardLinks(const std::wstring& inputPath) {
 
     wchar_t volumeRoot[MAX_PATH];
     if (!GetVolumePathNameW(inputPath.c_str(), volumeRoot, MAX_PATH)) {
-        // Fejlhåndtering
+
     }
-    // Fjern den afsluttende backslash fra "C:\", så vi ikke får dobbelt slash
+
     std::wstring drive(volumeRoot);
     if (drive.back() == L'\\') drive.pop_back();
-
-    // 2. Start søgning
     HANDLE h = FindFirstFileNameW(inputPath.c_str(), 0, &sz, lName);
 
     if (h != INVALID_HANDLE_VALUE) {
         do {
             std::wstring foundPath(lName);
 
-            // 3. Ekskluder hvis det er den samme som vores input (uden drevbogstav)
-            // Vi bruger case-insensitive sammenligning, da Windows er ligeglad med store/små bogstaver
             if (_wcsicmp(foundPath.c_str(), searchName.c_str()) != 0) {
                 otherLinks.push_back(drive + foundPath);
             }
 
-            sz = MAX_PATH; // Nulstil buffer-størrelse til næste kald
+            sz = MAX_PATH; 
         } while (FindNextFileNameW(h, &sz, lName));
 
         FindClose(h);
@@ -587,104 +558,30 @@ std::vector<std::wstring> GetAllHardLinks(const std::wstring& inputPath) {
 
 
 bool Isjunction(const std::wstring& path) {
-    // 1. Hent fil-attributter uden at åbne filen (hurtigt)
+
     DWORD attributes = GetFileAttributesW(path.c_str());
 
     if (attributes == INVALID_FILE_ATTRIBUTES) return false;
-
-    // Tjek om det overhovedet er et reparse point (Symlink, <JUNC>tion, osv.)
     if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
 
-    // 2. Vi skal bruge ReparseTag for at vide om det er en <JUNC>tion
     WIN32_FIND_DATAW findData;
     HANDLE hFind = FindFirstFileW(path.c_str(), &findData);
 
     if (hFind != INVALID_HANDLE_VALUE) {
         FindClose(hFind);
-        // IO_REPARSE_TAG_MOUNT_POINT er det tekniske navn for en <JUNC>tion
         return (findData.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT);
     }
 
     return false;
 }
 
-
-// 5. Finder Target for Soft- og Hardlinks
-std::wstring GetLinkTarget(const std::wstring& path, DWORD attr, DWORD numLinks) {
-
-    if (attr & FILE_ATTRIBUTE_REPARSE_POINT) {
-        HANDLE hFile = CreateFileW(path.c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            BYTE buffer[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
-            DWORD bytes;
-            if (DeviceIoControl(hFile, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer, sizeof(buffer), &bytes, NULL)) {
-                auto rb = (PREPARSE_DATA_BUFFER)buffer;
-                std::wstring t = std::wstring(rb->SymbolicLinkReparseBuffer.PathBuffer + rb->SymbolicLinkReparseBuffer.PrintNameOffset / 2, rb->SymbolicLinkReparseBuffer.PrintNameLength / 2)    ;
-                CloseHandle(hFile);
-                return t;
-            }
-            CloseHandle(hFile);
-        }
-    }
-    else if (numLinks > 1) {
-        wstring res;
-        vector<wstring> v = GetAllHardLinks(path);
-        for (auto &a : v) {
-            res += L"                                                                                                            • " + a + L"\n";
-        }
-        if (!res.empty()) {
-           // res.pop_back();
-        }
-		
-        return res;
-    }
-    return L"";
-}
-
-
-void set_privilege(const std::vector<std::wstring>& priv, bool enable) {
-    for (auto& p : priv) {
-        HANDLE hToken;
-        TOKEN_PRIVILEGES tp;
-        LUID luid;
-
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
-            continue;
-        if (!LookupPrivilegeValueW(NULL, p.c_str(), &luid))
-            continue;
-
-        tp.PrivilegeCount = 1;
-        tp.Privileges[0].Luid = luid;
-        tp.Privileges[0].Attributes = enable ? SE_PRIVILEGE_ENABLED : 0;
-
-        AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL);
-        CloseHandle(hToken);
-    }
-}
-
-#include <filesystem>
-
-#include <iostream>
-#include <string>
-#include <iomanip>
 #include <locale>
-#include <sstream>
 
-// Formaterer størrelsen med fast bredde og dansk tegnsæt (punktum/komma)
-std::wstring FormatFileSize(unsigned __int64 size, int width) {
-    // Vi bruger en dansk locale for at få de rigtige separatorer
-    // Hvis "Danish" ikke er installeret, kan man lave en manuel erstatning
+std::wstring FormatFileSize(unsigned __int64 size) {
     std::wstringstream ss;
     ss.imbue(std::locale("US"));
-
     ss << std::fixed << size;
     std::wstring result = ss.str();
-
-    // Hvis resultatet er kortere end width, tilføjer vi padding i starten (højrestillet)
-    if (result.length() < (size_t)width) {
-        result.insert(0, width - result.length(), L' ');
-    }
-
     return result;
 }
 
@@ -708,240 +605,310 @@ unsigned long long filesize(const wstring& file, bool followlinks = false) {
 
 unsigned __int64 GetSizeOnDisk(const std::wstring& path) {
     DWORD highPart = 0;
-    // GetCompressedFileSize returnerer den lave 32-bit del af størrelsen
     DWORD lowPart = GetCompressedFileSizeW(path.c_str(), &highPart);
 
     if (lowPart == INVALID_FILE_SIZE && GetLastError() != NO_ERROR) {
-        // Fejlhåndtering (f.eks. hvis filen ikke findes)
         return 0;
     }
 
-    // Kombiner high og low til en samlet 64-bit integer
     unsigned __int64 sizeOnDisk = (static_cast<unsigned __int64>(highPart) << 32) | lowPart;
 
     return sizeOnDisk;
 }
 
-std::wstring GetDiskPercentageString(unsigned __int64 logicalSize, unsigned __int64 sizeOnDisk) {
+std::wstring GetDiskPercentageString(uint64_t logicalSize, uint64_t sizeOnDisk) {
     int percentage = 100;
-
     if (logicalSize > 0) {
-        // Beregn procent (fysisk / logisk)
-        // Vi bruger double for at sikre præcision før afrunding til int
         percentage = static_cast<int>((static_cast<double>(sizeOnDisk) / logicalSize) * 100.0);
-
-        // Sikr at vi ikke runder over 100% (kan ske pga. cluster-afrunding på små filer)
     }
-
     std::wstringstream ss;
-    // Højrejustering i et felt på 3 tegn (så " 5%" og "100%" flugter)
     ss << std::setw(3) << percentage << L"%";
-
     return ss.str();
 }
 
 WIN32_FIND_DATAW fd;
 
 
-int wmain(int argc, wchar_t* argv[]) {
-    std::wstring targets;
-    std::wstring type;
-    LARGE_INTEGER t1, t2, t3, t4;
+template <typename T>
+T maximum(T a, T b) {
+    return (a > b) ? a : b;
+}
 
-    FILETIME ftNow;
-    GetSystemTimeAsFileTime(&ftNow);
+void print(const std::vector<std::vector<std::wstring>>& rows) {
+    if (rows.empty()) return;
 
-    // Convert FILETIME to 64-bit integer
-    LARGE_INTEGER now;
-    now.LowPart = ftNow.dwLowDateTime;
-    now.HighPart = ftNow.dwHighDateTime;
+    size_t numCols = 0;
+    for (const auto& row : rows) {
+        numCols = maximum(numCols, row.size());
+    }
 
-    BY_HANDLE_FILE_INFORMATION hi; FILE_BASIC_INFO bi;
-    WIN32_FIND_DATAW fd;
-    std::wstring inputPath = (argc > 1) ? argv[1] : L".";
-    std::wstring searchPattern;
-
-    // 1. Hent attributter for at se om det er en mappe (virker med ".." og ".")
-    DWORD attrs = GetFileAttributesW(inputPath.c_str());
-
-    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        // Det er en mappe - tilføj backslash hvis den mangler, og derefter *
-        searchPattern = inputPath;
-        if (searchPattern.back() != L'\\' && searchPattern.back() != L'/') {
-            searchPattern += L"\\";
+    std::vector<int> colWidths(numCols, 0);
+    for (const auto& row : rows) {
+        for (size_t i = 0; i < row.size(); ++i) {
+            colWidths[i] = maximum(colWidths[i], (int)row[i].length());
         }
-        searchPattern += L"*";
+    }
+
+    for (const auto& row : rows) {
+        std::wstring line;
+        for (size_t i = 0; i < numCols; ++i) {
+            std::wstring cell = (i < row.size()) ? row[i] : L"";
+            if (i == 6) {
+                line += std::format(L"{:>{}}  ", cell, colWidths[i]);
+            }
+            else {
+                line += std::format(L"{:<{}}  ", cell, colWidths[i]);
+            }
+        }
+        std::wcout << line << L"\n";
+    }
+}
+
+#include <regex>
+
+namespace fs = std::filesystem;
+LARGE_INTEGER now;
+
+
+
+
+
+
+std::vector<std::vector<std::wstring>> rows;
+
+bool recursive = false;
+bool permissions = false;
+
+
+
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <filesystem>
+#include <regex>
+#include <format>
+
+namespace fs = std::filesystem;
+
+// Hjælper til wildcard matching
+std::wregex WildcardToRegex(const std::wstring& wildcard) {
+    std::wstring pattern = wildcard;
+    pattern = std::regex_replace(pattern, std::wregex(L"\\."), L"\\.");
+    pattern = std::regex_replace(pattern, std::wregex(L"\\*"), L".*");
+    pattern = std::regex_replace(pattern, std::wregex(L"\\?"), L".");
+    return std::wregex(L"^" + pattern + L"$", std::regex_constants::icase);
+}
+
+void SearchRecursive(const fs::path& current_path, const std::wregex& pattern) {
+
+
+    try {
+        bool directory_announced = false;
+        std::vector<fs::path> subheaders;
+
+        // 1. Gennemgang af den aktuelle mappe
+        for (const auto& entry : fs::directory_iterator(current_path, fs::directory_options::skip_permission_denied)) {
+            const auto& path = entry.path();
+            std::wstring filename = path.filename().wstring();
+
+
+            // Hvis det matcher mønsteret, print det
+            if (std::regex_match(filename, pattern)) {
+                if (!directory_announced) {
+                    std::wcout << std::format(L"\n Directory of {}\n\n", current_path.wstring());
+                    directory_announced = true;
+                }
+
+                {
+                    LARGE_INTEGER t1, t2, t3, t4;
+                    BY_HANDLE_FILE_INFORMATION hi; FILE_BASIC_INFO bi;
+                    WIN32_FIND_DATAW fd;
+
+                    wstring written_;
+                    wstring type_;
+                    wstring size_;
+                    wstring percent_;
+                    wstring attributes_;
+                    wstring dates_;
+                    wstring permissions_;
+                    wstring name_;
+                    vector<pair<wstring, uint64_t>> ads_;
+                    vector<wstring> links_;
+
+                    wstring fullPath = std::filesystem::absolute(entry);
+                    HANDLE hFind = FindFirstFileW(fullPath.c_str(), &fd);
+
+                    if (hFind == INVALID_HANDLE_VALUE) {
+                        //return 1;
+                    }
+
+
+                    name_ = fd.cFileName;
+
+                    HANDLE hFile = CreateFileW(fullPath.c_str(), NULL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+
+                    if (hFile != INVALID_HANDLE_VALUE) {
+                        GetFileInformationByHandle(hFile, &hi);
+                        type_ = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                            ? (fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT ? L"<JUNC>" :
+                                (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? L"<SYMD>" : L"<SYM>"))
+                            : (hi.nNumberOfLinks > 1 ? L"<HARD>" :
+                                (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? L"<DIR>" : L""));
+
+                        if (type_ == L"<SYM>" || type_ == L"<SYMD>" || type_ == L"<JUNC>") {
+                            links_.push_back(GetLinkTarget2(fullPath));
+                        }
+                        else {
+                            links_ = GetAllHardLinks(fullPath);
+                        }
+                        GetFileInformationByHandleEx(hFile, FileBasicInfo, &bi, sizeof(bi));
+                        t1 = bi.LastWriteTime;
+                        t2 = bi.CreationTime;
+                        t3 = bi.ChangeTime;
+                        t4 = bi.LastAccessTime;
+                        CloseHandle(hFile);
+                    }
+                    else {
+                        // pagefile, hiberfil, etc can't be opened with CreateFileW
+                        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                            type_ = L"<DIR>";
+                        }
+                        else {
+                            type_ = L"";
+                        }
+                        t1.LowPart = fd.ftLastWriteTime.dwLowDateTime;
+                        t1.HighPart = fd.ftLastWriteTime.dwHighDateTime;
+                        t2.LowPart = fd.ftCreationTime.dwLowDateTime;
+                        t2.HighPart = fd.ftCreationTime.dwHighDateTime;
+                        t3.QuadPart = 0;
+                        t4.LowPart = fd.ftLastAccessTime.dwLowDateTime;
+                        t4.HighPart = fd.ftLastAccessTime.dwHighDateTime;
+                    }
+
+                    FindClose(hFind);
+
+                    if (type_ == L"<SYM>" || type_ == L"<HARD>" || type_ == L"") {
+                        auto size = filesize(fullPath, true);
+                        size_ = FormatFileSize(size);
+                        if (type_ != L"<SYM>") {
+                            percent_ = GetDiskPercentageString(size, GetSizeOnDisk(fullPath));
+                        }
+                    }
+
+                    written_ = GetTimeAgo(t1, now) + L" " + GetFormattedTime(t1, 2);
+
+                    if (type_ == L"<SYM>" || type_ == L"<SYMD>" || type_ == L"<JUNC>") {
+                        name_ += L" -> " + links_[0];
+                    }
+
+                    attributes_ = GetAttrStr(fd.dwFileAttributes);
+                    dates_ = GetTimeAgo(t2, now) + L" " + GetTimeAgo(t3, now) + L" " + GetTimeAgo(t4, now);
+                    permissions_ = PrintHumanACL(fullPath, permissions);
+                    ads_ = get_ads(fullPath);
+
+                    rows.push_back({ permissions_, dates_, percent_, attributes_, written_, type_, size_, name_ });
+
+                    // Alternate Data Streams (hver sin linje)
+                    for (const auto& [stream_name, stream_size] : ads_) {
+                        rows.push_back({ L"", L"", L"", L"", L"",L"", std::to_wstring(stream_size), L"    " + stream_name });
+                    }
+
+                    if (type_ == L"<HARD>") {
+                        for (const auto& link : links_) {
+                            rows.push_back({ L"", L"", L"" ,L"", L"", L"", L"", L"    " + link });
+                        }
+                    }
+
+                }
+
+            }
+
+            // Gem mapper til senere rekursion hvis -r er aktiv
+            if (recursive && entry.is_directory()) {
+                subheaders.push_back(path);
+            }
+        }
+
+        print(rows);
+        rows.clear();
+
+        // 2. Manuel rekursion ind i undermapper
+        for (const auto& sub_path : subheaders) {
+            SearchRecursive(sub_path, pattern);
+        }
+
+    }
+    catch (const fs::filesystem_error&) {
+        // Ignorer adgang nægtet osv.
+    }
+}
+
+void ProcessArgument(const std::wstring& input_arg) {
+    fs::path p(input_arg);
+    fs::path root;
+    std::wstring pattern_str;
+
+    if (fs::is_directory(p)) {
+        root = p;
+        pattern_str = L"*";
     }
     else {
-        // Det er enten en fil eller en søgestreng med wildcards (f.eks. *.txt)
-        searchPattern = inputPath;
+        root = p.has_parent_path() ? p.parent_path() : fs::current_path();
+        pattern_str = p.has_filename() ? p.filename().wstring() : L"*";
     }
 
-    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
-
-    if (hFind == INVALID_HANDLE_VALUE) {
-        // Hvis vi stadig fejler, er stien nok ugyldig
-        wprintf(L"Fejl: Kunne ikke tilgå '%ls' (ErrorCode: %lu)\n", inputPath.c_str(), GetLastError());
-        return 1;
+    if (fs::exists(root)) {
+        SearchRecursive(root, WildcardToRegex(pattern_str));
     }
+}
 
-    _setmode(_fileno(stdout), _O_U8TEXT);
-
-    if (hFind == INVALID_HANDLE_VALUE) return 1;
-
-    // Tabel Overskrift
-//    wprintf(L"Name                                    Size  Atributes       Type      Link target                 Creation          Last write        Last change       Last access        DAC                    ACL\n");
-//    wprintf(L"-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n");
-
-    do {
-        // Spring over "." og ".."
-        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
-            continue;
-
-        std::wstring name = fd.cFileName;
-
-        // 1. Konstruer den relative sti (mappe + filnavn)
-        // inputPath er den mappe, du modtog som parameter (f.eks. "..")
-        std::wstring relativePath = inputPath;
-        if (relativePath.back() != L'\\' && relativePath.back() != L'/') {
-            relativePath += L"\\";
-        }
-        relativePath += fd.cFileName;
-
-        // 2. Konverter til fuld absolut sti
-        wchar_t fullPath[MAX_PATH];
-        GetFullPathNameW(relativePath.c_str(), MAX_PATH, fullPath, NULL);
-
-        //WIN32_FIND_DATAW fd;
-        //HANDLE hFile = FindFirstFileW(fullPath, &fd);
-
-        HANDLE hFile = CreateFileW(fullPath, NULL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,  NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-
-        if (hFile != INVALID_HANDLE_VALUE) {
-
-            GetFileInformationByHandle(hFile, &hi);
-
-            // Type og Target
+int wmain3(int argc, wchar_t* argv[]) {
+    std::vector<std::wstring> patterns;
 
 
-            type = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-                ? (fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT ? L"<JUNC>" :
-                    (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? L"<SYMD>" : L"<SYM>"))
-                : (hi.nNumberOfLinks > 1 ? L"<HARD>" :
-                    (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? L"<DIR>" : L""));
 
-            if (type == L"<SYM>" || type == L"<SYMD>" || type == L"<JUNC>") {
-                targets = GetLinkTarget2(fullPath);
+    for (int i = 1; i < argc; ++i) {
+        std::wstring arg = argv[i];
+
+        // Tjek om argumentet starter med - eller / og behandl det som flag
+        if (arg.size() >= 2 && (arg[0] == L'-' || arg[0] == L'/')) {
+            for (size_t j = 1; j < arg.size(); ++j) {
+                if (arg[j] == L'r') recursive = true;
+                else if (arg[j] == L'p') permissions = true;
             }
-            else {
-                targets = GetLinkTarget(fullPath, fd.dwFileAttributes, hi.nNumberOfLinks);
-            }
-
-
-            GetFileInformationByHandleEx(hFile, FileBasicInfo, &bi, sizeof(bi));
-			t1 = bi.LastWriteTime;
-			t2 = bi.CreationTime;
-			t3 = bi.ChangeTime;
-			t4 = bi.LastAccessTime;
         }
         else {
-			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                type = L"<DIR>";
-            }
-            else {
-                type = L"";
-            }
-            t1.LowPart = fd.ftLastWriteTime.dwLowDateTime;
-            t1.HighPart = fd.ftLastWriteTime.dwHighDateTime;
-            t2.LowPart = fd.ftCreationTime.dwLowDateTime;
-            t2.HighPart = fd.ftCreationTime.dwHighDateTime;
-            t3.QuadPart = 0;
-            t4.LowPart = fd.ftLastAccessTime.dwLowDateTime;
-            t4.HighPart = fd.ftLastAccessTime.dwHighDateTime;
+            std::replace(arg.begin(), arg.end(), L'/', L'\\');
+            patterns.push_back(arg);
         }
-
-               
-
-        auto siz = filesize(fullPath, true);
-        auto fs = FormatFileSize(siz, 17);
-            
-
-		auto percent = GetDiskPercentageString(siz, GetSizeOnDisk(fullPath));
-
-        PrintTime(t1, 2);
-        wprintf(L" ");
-        wcout << GetTimeAgo(t1, now);
-        wprintf(L" ");
-
-        bool has_size = type == L"<SYM>" || type == L"<HARD>" || type == L"";
-
-        wprintf(L" %-10ls ", type.c_str());
-        wprintf(L"%-17ls ", has_size ? fs.c_str() : L"");
+    }
 
 
+    if (patterns.empty()) patterns.push_back(L".");
 
-		if (type == L"<SYM>" || type == L"<SYMD>" || type == L"<JUNC>") {
-            name += L" -> " + targets;
-        }
+    for (const auto& p : patterns) {
+        ProcessArgument(p);
+    }
 
-
-
-        wprintf(L" %-4ls ", has_size ? percent.c_str() : L"");
-
-        // Print Navn og Attributter
-        wprintf(L" %-8ls", GetAttrStr(fd.dwFileAttributes).c_str());
-
-
-        //wprintf(L"  %-20ls  ", lt.c_str());
-
-
-        wcout << GetTimeAgo(t2, now);
-//        PrintTime(t2, 1);
-        wprintf(L" ");
-        wcout << GetTimeAgo(t3, now);
-        //        PrintTime(t3, 1);
-        wprintf(L" ");
-        wcout << GetTimeAgo(t4, now);
-
-//        PrintTime(t4, 1);
-
-            
-            wprintf(L"  ");
-
-
-
-
-            // ACL og ADS                      
-           // fseek(stdout, -15, SEEK_CUR);
-            auto acl = PrintHumanACL(fullPath, false);
-			PrintTruncatedAligned(acl, 20);
-
-            PrintTruncatedAligned(name, 100);
-
-            auto a = get_ads(fullPath);
-            if (!a.empty()) {
-                for (auto& ad : a) {
-                    auto s = FormatFileSize(ad.second, 18);
-                    wprintf(L"\n                                    ");
-                    wprintf(L"%-60ls           ", s.c_str());
-                    wstring add = L" • " + ad.first;
-                    PrintTruncatedAligned(add, 82);
-                }
-            }
-
-            CloseHandle(hFile);
-            wprintf(L"\n");
-
-            if (type == L"<HARD>") {
-                wcout << targets;
-            }
-
-
-      //  wprintf(L"\n");
-    } while (FindNextFileW(hFind, &fd));
-
-    FindClose(hFind);
     return 0;
 }
 
 
+
+
+
+
+
+
+int wmain(int argc, wchar_t* argv[]) {
+    FILETIME ftNow;
+    GetSystemTimeAsFileTime(&ftNow);
+    now.LowPart = ftNow.dwLowDateTime;
+    now.HighPart = ftNow.dwHighDateTime;
+
+
+    _setmode(_fileno(stdout), _O_U8TEXT);
+
+    wmain3(argc, argv);
+}
